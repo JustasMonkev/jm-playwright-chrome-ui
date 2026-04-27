@@ -47,7 +47,8 @@ export async function sendCDPCommand<T>(session: CDPSession, method: string, par
 
 function assertChromiumBrowser(browser: Browser): void {
   const browserType = browser.browserType().name();
-  if (browserType !== 'chromium')
+  if (browserType !== 'chromium') {
     throw new Error(`Chrome UI helpers only support Chromium browsers. Received "${browserType}".`);
+  }
 }
 
