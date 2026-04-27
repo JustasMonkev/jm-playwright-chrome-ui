@@ -1,0 +1,47 @@
+{
+  "name": "playwright-chrome-ui",
+  "version": "0.0.0",
+  "description": "Experimental Chrome UI helpers for Playwright",
+  "engines": {
+    "node": ">=24"
+  },
+  "private": true,
+  "license": "UNLICENSED",
+  "files": [
+    "README.md",
+    "examples",
+    "index.d.ts",
+    "index.js",
+    "index.mjs",
+    "lib",
+    "playwright.config.ts",
+    "types"
+  ],
+  "scripts": {
+    "build": "esbuild src/index.ts --bundle --platform=node --format=cjs --outfile=lib/index.js",
+    "example:test": "npm run build && playwright test examples/youtube-short-blocker.spec.ts --headed",
+    "report": "playwright show-report playwright-report",
+    "test": "npm run build && playwright test tests/youtube-short-blocker.spec.ts --headed",
+    "test:all": "npm run build && playwright test --headed",
+    "test:report": "npm test && npm run report",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.mjs",
+      "require": "./index.js",
+      "default": "./index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "dependencies": {
+    "playwright-core": "^1.53.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "esbuild": "^0.25.0",
+    "playwright": "^1.53.0",
+    "typescript": "^5.8.3"
+  }
+}
