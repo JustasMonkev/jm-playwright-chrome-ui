@@ -4,6 +4,9 @@
   "description": "Experimental Chrome UI helpers for Playwright",
   "private": true,
   "license": "UNLICENSED",
+  "engines": {
+    "node": "25"
+  },
   "files": [
     "README.md",
     "index.d.ts",
