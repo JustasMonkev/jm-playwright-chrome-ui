@@ -16,7 +16,7 @@ npm install
 
 ```ts
 import { chromium } from 'playwright';
-import { listExtensions, openExtension } from 'playwright-chrome-ui';
+import { openExtension } from 'playwright-chrome-ui';
 
 const extensionPath = 'youtube-short-blocker/dist';
 const context = await chromium.launchPersistentContext('/tmp/chrome-ui-profile', {
@@ -31,9 +31,10 @@ const context = await chromium.launchPersistentContext('/tmp/chrome-ui-profile',
 const page = await context.newPage();
 await page.goto('https://example.com');
 
-console.log(await listExtensions(page));
-
-const extensionPage = await openExtension(page, { name: 'YouTube Shorts Blocker' });
+const extensionPage = await openExtension(page, {
+  name: 'YouTube Shorts Blocker',
+  path: extensionPath,
+});
 await extensionPage.locator('#custom-site').fill('facebook.com');
 await extensionPage.getByRole('button', { name: 'Add to blocklist' }).click();
 
@@ -44,4 +45,4 @@ await context.close();
 
 - `listExtensions(target)` lists loaded Chrome extensions.
 - `triggerExtensionAction(page, selector)` triggers an extension toolbar action.
-- `openExtension(page, options)` opens an extension action and returns an automatable Playwright `Page`.
+- `openExtension(page, options)` waits for the selected extension, opens its action, and returns an automatable Playwright `Page`.

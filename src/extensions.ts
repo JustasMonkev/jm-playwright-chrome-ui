@@ -33,11 +33,11 @@ export async function triggerExtensionAction(page: Page, options: ExtensionSelec
 
 export async function openExtension(page: Page, options: ExtensionActionOptions): Promise<Page> {
   const browser = browserFrom(page);
+  const timeout = options.timeout ?? kDefaultTimeout;
   const [extension, targetId] = await Promise.all([
-    resolveExtension(browser, options),
+    waitForExtension(browser, options, timeout),
     tabTargetIdForPage(page, browser),
   ]);
-  const timeout = options.timeout ?? kDefaultTimeout;
   const popupURL = await triggerActionAndFindPopupURL(browser, extension, targetId, timeout);
   return await pageForPopupURL(page, popupURL, timeout);
 }
@@ -65,6 +65,25 @@ async function pageForPopupURL(page: Page, popupURL: string, timeout: number): P
 
 async function resolveExtension(browser: Browser, selector: ExtensionSelector): Promise<ChromeExtension> {
   const extensions = await listExtensions(browser);
+  return extensionMatching(extensions, selector);
+}
+
+async function waitForExtension(browser: Browser, selector: ExtensionSelector, timeout: number): Promise<ChromeExtension> {
+  const deadline = Date.now() + timeout;
+  let extensions: ChromeExtension[] = [];
+  while (Date.now() < deadline) {
+    extensions = await listExtensions(browser);
+    const matches = extensions.filter(extension => matchesSelector(extension, selector));
+    if (matches.length === 1)
+      return matches[0];
+    if (matches.length > 1)
+      throw new Error(`Chrome extension selector matched multiple extensions: ${formatExtensions(matches)}`);
+    await delay(100);
+  }
+  throw new Error(`No Chrome extension matches the selector within ${timeout}ms. Available extensions: ${formatExtensions(extensions)}`);
+}
+
+function extensionMatching(extensions: ChromeExtension[], selector: ExtensionSelector): ChromeExtension {
   const matches = extensions.filter(extension => matchesSelector(extension, selector));
   if (!matches.length)
     throw new Error(`No Chrome extension matches the selector. Available extensions: ${formatExtensions(extensions)}`);
@@ -78,7 +97,9 @@ function matchesSelector(extension: ChromeExtension, selector: ExtensionSelector
     return false;
   if (selector.name && !matchesName(extension.name, selector.name))
     return false;
-  return !!selector.id || !!selector.name;
+  if (selector.path && extension.path !== selector.path)
+    return false;
+  return !!selector.id || !!selector.name || !!selector.path;
 }
 
 function matchesName(extensionName: string, selectorName: string | RegExp): boolean {
@@ -91,3 +112,6 @@ function formatExtensions(extensions: ChromeExtension[]): string {
   return extensions.map(extension => `${extension.name} (${extension.id})`).join(', ') || 'none';
 }
 
+async function delay(ms: number): Promise<void> {
+  await new Promise(resolve => setTimeout(resolve, ms));
+}

@@ -4,7 +4,7 @@ import * as path from 'node:path';
 
 import {chromium, expect, test} from 'playwright/test';
 
-import {listExtensions, openExtension} from '..';
+import {openExtension} from '..';
 
 type CustomSite = {
     host: string;
@@ -28,18 +28,10 @@ test('adds facebook.com to the YouTube Shorts Blocker blocklist', async ({}, tes
         ],
     });
 
-    console.log(testInfo.outputPath('user-data-dir'));
-
     const page = await context.newPage();
     await page.goto('https://example.com');
 
-    await expect.poll(async () => await listExtensions(page)).toContainEqual(expect.objectContaining({
-        name: 'YouTube Shorts Blocker',
-        path: extensionPath,
-        enabled: true,
-    }));
-
-    const extensionPage = await openExtension(page, {name: 'YouTube Shorts Blocker', timeout: 10000});
+    const extensionPage = await openExtension(page, {name: 'YouTube Shorts Blocker', path: extensionPath, timeout: 10000});
     await extensionPage.locator('#custom-site').fill('facebook.com');
     await extensionPage.getByRole('button', {name: 'Add to blocklist'}).click();
 
@@ -52,7 +44,7 @@ test('adds facebook.com to the YouTube Shorts Blocker blocklist', async ({}, tes
 
     expect(customSites).toEqual([
         expect.objectContaining({
-            host: 'block.com',
+            host: 'facebook.com',
             mode: 'block',
             enabled: true,
         }),

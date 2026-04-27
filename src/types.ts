@@ -11,6 +11,7 @@ export type ChromeExtension = {
 export type ExtensionSelector = {
   id?: string;
   name?: string | RegExp;
+  path?: string;
 };
 
 export type ExtensionActionOptions = ExtensionSelector & {
@@ -26,4 +27,3 @@ export type TargetInfo = {
   type?: string;
   url: string;
 };
-
