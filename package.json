@@ -2,19 +2,14 @@
   "name": "playwright-chrome-ui",
   "version": "0.0.0",
   "description": "Experimental Chrome UI helpers for Playwright",
-  "engines": {
-    "node": ">=24"
-  },
   "private": true,
   "license": "UNLICENSED",
   "files": [
     "README.md",
-    "examples",
     "index.d.ts",
     "index.js",
     "index.mjs",
     "lib",
-    "playwright.config.ts",
     "types"
   ],
   "scripts": {
@@ -36,12 +31,12 @@
     "./package.json": "./package.json"
   },
   "dependencies": {
-    "playwright-core": "^1.53.0"
+    "playwright-core": "^1.59.1"
   },
   "devDependencies": {
-    "@types/node": "^22.15.3",
-    "esbuild": "^0.25.0",
-    "playwright": "^1.53.0",
-    "typescript": "^5.8.3"
+    "@types/node": "^25.6.0",
+    "esbuild": "^0.28.0",
+    "playwright": "^1.59.1",
+    "typescript": "^6.0.3"
   }
 }
