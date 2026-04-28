@@ -1,22 +1,26 @@
-# playwright-chrome-ui
+# jm-playwright-chrome-ui
 
 Helpers for driving Chrome extension UI from Playwright.
 
-This package is Chromium-only. Launch Chromium with
-`--enable-unsafe-extension-debugging` and load an unpacked extension before using
-the helpers.
+This package is Chromium-only. It uses Chrome DevTools Protocol extension
+commands and requires Chromium to be launched with
+`--enable-unsafe-extension-debugging`.
+
+Use these helpers only in tests with trusted extensions, trusted pages, and
+throwaway browser profiles. Do not run them against your day-to-day Chrome
+profile or any browser exposed to untrusted remote debugging clients.
 
 ## Install
 
 ```bash
-npm install
+npm install playwright jm-playwright-chrome-ui
 ```
 
 ## Example
 
 ```ts
 import { chromium } from 'playwright';
-import { openExtension } from 'playwright-chrome-ui';
+import { openExtension } from 'jm-playwright-chrome-ui';
 
 const extensionPath = 'youtube-short-blocker/dist';
 const context = await chromium.launchPersistentContext('/tmp/chrome-ui-profile', {
@@ -46,3 +50,17 @@ await context.close();
 - `listExtensions(target)` lists loaded Chrome extensions.
 - `triggerExtensionAction(page, selector)` triggers an extension toolbar action.
 - `openExtension(page, options)` waits for the selected extension, opens its action, and returns an automatable Playwright `Page`.
+
+Selectors can use `id`, `name`, `path`, or a combination of those fields. Passing
+both `name` and `path` is recommended when more than one extension may be loaded.
+
+This release is tested with Playwright 1.59.x.
+
+## Release Checks
+
+```bash
+npm run build
+npm run typecheck
+npm pack --dry-run
+npm publish --dry-run
+```
