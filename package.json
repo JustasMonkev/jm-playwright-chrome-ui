@@ -1,6 +1,6 @@
 {
   "name": "jm-playwright-chrome-ui",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "description": "Chrome extension UI helpers for Playwright",
   "keywords": [
     "playwright",
