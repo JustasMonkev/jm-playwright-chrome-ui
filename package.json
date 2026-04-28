@@ -18,12 +18,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/justasMonkev/playwright-chrome-ui.git"
+    "url": "git+https://github.com/JustasMonkev/jm-playwright-chrome-ui.git"
   },
   "bugs": {
-    "url": "https://github.com/justasMonkev/playwright-chrome-ui/issues"
+    "url": "https://github.com/JustasMonkev/jm-playwright-chrome-ui/issues"
   },
-  "homepage": "https://github.com/justasMonkev/playwright-chrome-ui#readme",
+  "homepage": "https://github.com/JustasMonkev/jm-playwright-chrome-ui#readme",
   "publishConfig": {
     "access": "public"
   },
