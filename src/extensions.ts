@@ -1,3 +1,6 @@
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+
 import type { CDPSession, Page, Worker } from 'playwright-core';
 
 import { browserFrom, contextFrom, sendCDPCommand, withBrowserSession } from './cdp';
@@ -136,7 +139,25 @@ function actionPopupURL(extension: ChromeExtension): string {
     const key = manifest.manifestVersion >= 3 ? 'action' : 'browser_action';
     throw new Error(`Chrome extension "${extension.name}" does not declare an action popup (${key}.default_popup in its manifest), so clicking its toolbar icon opens no document. Use triggerExtensionAction() to dispatch chrome.action.onClicked instead.`);
   }
-  return extensionResourceURL(extension.id, manifest.defaultPopup);
+
+  const url = extensionResourceURL(extension.id, manifest.defaultPopup);
+  // Chrome installs an extension whose default_popup points at nothing and serves its own error
+  // page for it, which would otherwise surface as a puzzling "locator not found" much later.
+  const file = popupFilePath(extension.path, url);
+  if (file && !fs.existsSync(file))
+    throw new Error(`Chrome extension "${extension.name}" declares an action popup at "${manifest.defaultPopup}", but ${file} does not exist.`);
+
+  return url;
+}
+
+function popupFilePath(extensionPath: string, popupURL: string): string | undefined {
+  try {
+    const relative = decodeURIComponent(new URL(popupURL).pathname).replace(/^\/+/, '');
+    return relative ? path.join(extensionPath, relative) : undefined;
+  } catch {
+    // Malformed percent-encoding; leave it to Chrome rather than guessing at a filename.
+    return undefined;
+  }
 }
 
 async function dismissActionPopup(session: CDPSession, extensionId: string, popupURL: string, alreadyOpen: Set<string>): Promise<void> {

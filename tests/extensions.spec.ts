@@ -54,6 +54,18 @@ test('fails fast when the extension declares no action popup', async ({}, testIn
   await context.close();
 });
 
+test('reports a declared popup whose file is missing', async ({}, testInfo) => {
+  // Chrome installs this happily and serves its own error page for the popup, which would
+  // otherwise surface as a puzzling missing locator.
+  const context = await launchWithExtension(fixturePath('mv3-missing-popup'), testInfo.outputPath('profile'));
+  const page = await context.newPage();
+  await page.goto('data:text/html,<title>Under test</title><h1>host</h1>');
+
+  await expect(openExtension(page, { name: 'MV3 Missing Popup Fixture', timeout: 10_000 }))
+    .rejects.toThrow(/declares an action popup at "popup\.html", but .*popup\.html does not exist/);
+  await context.close();
+});
+
 test('matches an extension by a relative path', async ({}, testInfo) => {
   // Chrome reports an absolute, symlink-resolved path; callers pass what they gave
   // --load-extension.
