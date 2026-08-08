@@ -54,7 +54,7 @@ await context.close();
 Selectors can use `id`, `name`, `path`, or a combination of those fields. Passing
 both `name` and `path` is recommended when more than one extension may be loaded.
 
-This release is tested with Playwright 1.59.x.
+This release is tested with Playwright 1.62.x and requires Node.js 20 or newer.
 
 ## Release Checks
 
