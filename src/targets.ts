@@ -6,6 +6,9 @@ import type { TargetInfo } from './types';
 // How long to wait for a tab target to report the page it hosts. The event normally arrives in
 // single-digit milliseconds; this only bounds the pathological case.
 const kOwnershipTimeout = 500;
+// After a tab reports a page that is not the one we want, how long to keep listening in case it
+// owns another.
+const kSettleDelay = 15;
 
 /**
  * Extensions.triggerAction only accepts a `tab` target — Chrome rejects a `page` target with
@@ -60,38 +63,53 @@ async function tabTargets(session: CDPSession): Promise<TargetInfo[]> {
   return targetInfos;
 }
 
-// Target.autoAttachRelated takes the tab as a parameter rather than requiring a command to be
+// Target.autoAttachRelated takes the tab as a parameter rather than requiring the command to be
 // sent on the tab's own session, which Playwright's CDPSession cannot address.
+//
+// A tab normally owns exactly one page target, but it can own more (a prerendered page, for
+// instance), so settle briefly after the first one arrives rather than judging by whichever
+// attaches first.
 async function tabOwnsPageTarget(session: CDPSession, tabTargetId: string, pageTargetId: string): Promise<boolean> {
   const attachedSessionIds: string[] = [];
-  let reportOwnedPage: (targetId: string | undefined) => void = () => {};
-  const ownedPage = new Promise<string | undefined>(resolve => {
-    reportOwnedPage = resolve;
+  let owned = false;
+  let reportSettled: () => void = () => {};
+  const settled = new Promise<void>(resolve => {
+    reportSettled = resolve;
   });
 
+  let settleTimer: NodeJS.Timeout | undefined;
   const onAttached = (event: any) => {
     if (event.sessionId)
       attachedSessionIds.push(event.sessionId);
-    if (event.targetInfo?.type === 'page')
-      reportOwnedPage(event.targetInfo.targetId);
+    if (event.targetInfo?.type !== 'page')
+      return;
+    if (event.targetInfo.targetId === pageTargetId) {
+      owned = true;
+      reportSettled();
+      return;
+    }
+    clearTimeout(settleTimer);
+    settleTimer = setTimeout(reportSettled, kSettleDelay);
   };
 
   session.on('Target.attachedToTarget' as any, onAttached);
-  let timer: NodeJS.Timeout | undefined;
+  let deadlineTimer: NodeJS.Timeout | undefined;
   try {
     await sendCDPCommand(session, 'Target.autoAttachRelated', {
       targetId: tabTargetId,
       waitForDebuggerOnStart: false,
+      filter: [{ type: 'page' }],
     });
-    const timedOut = new Promise<undefined>(resolve => {
-      timer = setTimeout(() => resolve(undefined), kOwnershipTimeout);
+    const timedOut = new Promise<void>(resolve => {
+      deadlineTimer = setTimeout(resolve, kOwnershipTimeout);
     });
-    return await Promise.race([ownedPage, timedOut]) === pageTargetId;
+    await Promise.race([settled, timedOut]);
+    return owned;
   } finally {
-    if (timer)
-      clearTimeout(timer);
+    clearTimeout(settleTimer);
+    clearTimeout(deadlineTimer);
     session.off('Target.attachedToTarget' as any, onAttached);
-    // Leaving these attached would keep debugger sessions alive for every tab we probed.
+    // Leaving these attached would keep a debugger session alive for every tab we probed.
     for (const sessionId of attachedSessionIds)
       await sendCDPCommand(session, 'Target.detachFromTarget', { sessionId }).catch(() => {});
   }

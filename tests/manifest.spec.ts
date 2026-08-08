@@ -129,4 +129,12 @@ test('resolves manifest resource paths the way Chrome does', () => {
   expect(extensionResourceURL(id, 'ui/popup.html')).toBe(`chrome-extension://${id}/ui/popup.html`);
   expect(extensionResourceURL(id, 'popup.html?tab=1')).toBe(`chrome-extension://${id}/popup.html?tab=1`);
   expect(extensionResourceURL(id, './popup.html')).toBe(`chrome-extension://${id}/popup.html`);
+  // Traversal cannot climb past the origin root.
+  expect(extensionResourceURL(id, '../../etc/passwd')).toBe(`chrome-extension://${id}/etc/passwd`);
+});
+
+test('refuses a manifest resource that points outside the extension', () => {
+  const id = 'abcdefghijklmnopabcdefghijklmnop';
+  for (const escape of ['//evil.example/x', 'http://evil.example/x', 'javascript:alert(1)', 'data:text/html,x'])
+    expect(() => extensionResourceURL(id, escape)).toThrow(/outside the extension's origin/);
 });

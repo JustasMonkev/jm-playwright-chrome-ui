@@ -43,7 +43,14 @@ export function readExtensionManifest(extensionPath: string): ExtensionManifest 
 // "ui/popup.html", or carry a query string. Resolving against the extension origin applies the
 // same rules Chrome does.
 export function extensionResourceURL(extensionId: string, resource: string): string {
-  return new URL(resource, `chrome-extension://${extensionId}/`).toString();
+  const url = new URL(resource, `chrome-extension://${extensionId}/`);
+  // A manifest entry is meant to be a relative path, but URL resolution happily follows
+  // "//host/x", "http://host/x" or "javascript:..." somewhere else entirely. Refuse to hand
+  // back anything that leaves the extension, rather than navigating a test browser to it.
+  if (url.protocol !== 'chrome-extension:' || url.hostname !== extensionId.toLowerCase()) {
+    throw new Error(`Extension resource "${resource}" resolves to ${url.toString()}, which is outside the extension's origin.`);
+  }
+  return url.toString();
 }
 
 // Chrome keys the toolbar action off manifest_version, not off whichever key happens to be

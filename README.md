@@ -112,10 +112,12 @@ If the extension declares no popup — an MV3 `action` with only a
 than waiting for a popup that will never open. Use `triggerExtensionAction` for
 those extensions.
 
-**The returned page is a tab, not Chrome's popup bubble.** Chrome's real popup
-bubble is never exposed to Playwright as a `Page`, so `openExtension` triggers
-the action, dismisses the bubble, and hosts the popup document in a tab. The
-popup's own scripts see a different `chrome.tabs` view as a result:
+**The returned page is a tab, not Chrome's popup bubble.** Chrome never emits an
+incremental attach event for a popup bubble opened after a client armed
+auto-attach, so Playwright never surfaces the bubble as a `Page` on the
+connection that launched the browser. `openExtension` therefore triggers the
+action, dismisses the bubble, and hosts the popup document in a tab. The popup's
+own scripts see a different `chrome.tabs` view as a result:
 
 | | real popup bubble | popup hosted in a tab |
 | --- | --- | --- |
@@ -125,6 +127,13 @@ popup's own scripts see a different `chrome.tabs` view as a result:
 MV3 popups commonly call `chrome.tabs.query` on open, because there is no
 persistent background page holding "which tab am I acting on". If yours does,
 it will act on the popup's tab under automation.
+
+If that difference matters for your extension, the real bubble *is* reachable:
+launch with `--remote-debugging-port`, call `triggerExtensionAction`, wait for a
+`chrome-extension://` target of type `page` to carry the popup URL, then
+`chromium.connectOverCDP()` — a connection opened while the bubble is already up
+enumerates it as a genuine `Page` with full locator support. It needs a fresh
+connection per popup, and that connection is yours to close.
 
 **Service workers stop when idle.** `extensionServiceWorker` returns the
 currently running worker; that object goes dead when Chrome shuts the worker

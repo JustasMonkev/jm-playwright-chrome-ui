@@ -53,7 +53,9 @@ export async function sendCDPCommand<T>(session: CDPSession, method: string, par
   try {
     return await (session as any).send(method, params);
   } catch (error: any) {
-    if (method.startsWith('Extensions.') && /wasn't found|not found|enable-unsafe-extension-debugging|not supported|not allowed/i.test(error.message))
+    // Only rewrite "the command does not exist" errors. Messages like "Extension not found" are
+    // about the arguments, and replacing them would hide the real cause.
+    if (method.startsWith('Extensions.') && /wasn't found|enable-unsafe-extension-debugging|not supported|not allowed/i.test(error.message))
       throw new Error(`"${method}" is unavailable. Chrome extension UI commands require Chromium launched with --enable-unsafe-extension-debugging, and a Chrome build new enough to expose the CDP Extensions domain: ${error.message}`);
     throw error;
   }
