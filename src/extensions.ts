@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
-import type { CDPSession, Page, Worker } from 'playwright-core';
+import type { BrowserContext, CDPSession, Page, Worker } from 'playwright-core';
 
 import { browserFrom, contextFrom, sendCDPCommand, withBrowserSession } from './cdp';
 import { extensionResourceURL, readExtensionManifest } from './manifest';
@@ -48,31 +48,33 @@ export async function triggerExtensionAction(page: Page, options: ExtensionSelec
  * dormant service worker and can create offscreen documents, and those are indistinguishable
  * from a popup by URL prefix alone.
  *
- * Chrome's real popup bubble cannot be driven by Playwright, so the popup document is hosted in
- * a tab instead. See the README for the `chrome.tabs` differences that implies.
+ * Chrome never surfaces its own popup bubble as a Page on the connection that launched the
+ * browser, so the popup document is hosted in a tab instead. See the README for the
+ * `chrome.tabs` differences that implies, and for how to reach the real bubble if they matter.
  */
 export async function openExtension(page: Page, options: ExtensionActionOptions): Promise<Page> {
   const browser = browserFrom(page);
   const timeout = options.timeout ?? kDefaultTimeout;
 
-  const popupURL = await withBrowserSession(browser, async session => {
+  // Two concurrent calls would each see no popup tab yet and each open one, leaving two live
+  // instances of the popup document.
+  return await withPopupLock(page.context(), () => withBrowserSession(browser, async session => {
     const extension = await waitForExtension(session, options, timeout);
     const url = actionPopupURL(extension);
     const targetId = await tabTargetIdForPage(session, page);
 
-    const alreadyOpen = new Set(
-      (await extensionDocumentTargets(session, extension.id))
-        .filter(target => target.url === url)
-        .map(target => target.targetId));
-
     await sendCDPCommand(session, 'Extensions.triggerAction', { id: extension.id, targetId });
+
     // Leaving Chrome's bubble open would run a second live instance of the popup document
     // alongside the one under test, doubling its storage writes and runtime messages.
-    await dismissActionPopup(session, extension.id, url, alreadyOpen);
-    return url;
-  });
-
-  return await pageForPopupURL(page, popupURL, timeout);
+    const dismissed = await closeBubbleWithin(session, extension.id, url, Math.min(timeout, kPopupDismissTimeout));
+    const popup = await pageForPopupURL(page, url, timeout);
+    // The bubble takes a few hundred milliseconds to surface, and longer on a loaded machine.
+    // If it had not appeared yet, keep looking now that the hosted tab exists.
+    if (!dismissed)
+      await closeBubbleWithin(session, extension.id, url, Math.min(timeout, kPopupDismissTimeout));
+    return popup;
+  }));
 }
 
 /**
@@ -160,28 +162,55 @@ function popupFilePath(extensionPath: string, popupURL: string): string | undefi
   }
 }
 
-async function dismissActionPopup(session: CDPSession, extensionId: string, popupURL: string, alreadyOpen: Set<string>): Promise<void> {
-  const deadline = Date.now() + kPopupDismissTimeout;
+async function closeBubbleWithin(session: CDPSession, extensionId: string, popupURL: string, budget: number): Promise<boolean> {
+  const deadline = Date.now() + budget;
   do {
+    // Only unattached targets: every page Playwright owns — the popup tab, a tab the test
+    // opened, a tab the extension opened with chrome.tabs.create — reports attached, and
+    // closing one of those would destroy a page the caller is using.
     const bubble = (await extensionDocumentTargets(session, extensionId))
-      .find(target => target.url === popupURL && !alreadyOpen.has(target.targetId));
+      .find(target => target.attached === false && isSameDocument(target.url, popupURL));
     if (bubble) {
       await sendCDPCommand(session, 'Target.closeTarget', { targetId: bubble.targetId }).catch(() => {});
-      return;
+      return true;
     }
-    await delay(50);
+    await delay(25);
   } while (Date.now() < deadline);
-  // The bubble may have closed itself when focus moved. Nothing to clean up.
+  // The bubble closes itself when focus moves, so not finding one is normal.
+  return false;
 }
 
 async function pageForPopupURL(page: Page, popupURL: string, timeout: number): Promise<Page> {
-  const existingPopup = page.context().pages().find(popup => !popup.isClosed() && popup.url() === popupURL);
+  const existingPopup = page.context().pages()
+    .find(popup => !popup.isClosed() && isSameDocument(popup.url(), popupURL));
   if (existingPopup)
     return existingPopup;
 
   const popup = await page.context().newPage();
   await popup.goto(popupURL, { waitUntil: 'domcontentloaded', timeout });
   return popup;
+}
+
+// Extension popups routinely rewrite their own URL on load — `location.replace(path + '#/home')`
+// is the standard hash-router opening move — so the live document rarely matches the manifest
+// URL exactly. Compare everything but the fragment.
+function isSameDocument(url: string, popupURL: string): boolean {
+  return withoutFragment(url) === withoutFragment(popupURL);
+}
+
+function withoutFragment(url: string): string {
+  const hash = url.indexOf('#');
+  return hash === -1 ? url : url.slice(0, hash);
+}
+
+// Serialises popup opening per browser context so concurrent callers share one popup tab.
+const popupLocks = new WeakMap<BrowserContext, Promise<unknown>>();
+
+function withPopupLock<T>(context: BrowserContext, operation: () => Promise<T>): Promise<T> {
+  const previous = popupLocks.get(context) ?? Promise.resolve();
+  const result = previous.then(operation, operation);
+  popupLocks.set(context, result.catch(() => {}));
+  return result;
 }
 
 async function extensionsOnSession(session: CDPSession): Promise<ChromeExtension[]> {

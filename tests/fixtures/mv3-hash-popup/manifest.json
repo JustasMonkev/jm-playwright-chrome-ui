@@ -1,0 +1,7 @@
+{
+  "manifest_version": 3,
+  "name": "MV3 Hash Router Fixture",
+  "version": "1.0.0",
+  "action": { "default_popup": "popup.html" },
+  "permissions": ["storage"]
+}

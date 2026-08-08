@@ -17,14 +17,25 @@ const kSettleDelay = 15;
  */
 export async function tabTargetIdForPage(session: CDPSession, page: Page): Promise<string> {
   await page.bringToFront();
-  const pageTargetId = await pageTargetIdFor(page);
+  const pageTarget = await pageTargetInfoFor(page);
 
-  for (const tab of await tabTargets(session)) {
-    if (await tabOwnsPageTarget(session, tab.targetId, pageTargetId))
+  // Probing costs a round trip per tab, and a tab that owns no page target (an offscreen
+  // document's tab, for one) costs the whole ownership timeout. URL and title cannot identify
+  // the tab on their own, but they order the candidates well enough that the real one is
+  // almost always probed first.
+  for (const tab of byLikelihood(await tabTargets(session), pageTarget)) {
+    if (await tabOwnsPageTarget(session, tab.targetId, pageTarget.targetId))
       return tab.targetId;
   }
 
   throw new Error(`Could not find the Chrome tab target for page "${page.url()}". The page may have been closed, or it may not be a tab (extension popups and devtools windows are not tabs).`);
+}
+
+function byLikelihood(tabs: TargetInfo[], pageTarget: TargetInfo): TargetInfo[] {
+  const rank = (tab: TargetInfo) =>
+    (tab.url === pageTarget.url ? 2 : 0) +
+    (tab.title === pageTarget.title ? 1 : 0);
+  return [...tabs].sort((left, right) => rank(right) - rank(left));
 }
 
 /** Targets serving a document from the extension's own origin, excluding duplicate tab entries. */
@@ -46,11 +57,11 @@ function isDocumentTarget(target: TargetInfo): boolean {
   return target.type === 'page';
 }
 
-async function pageTargetIdFor(page: Page): Promise<string> {
+async function pageTargetInfoFor(page: Page): Promise<TargetInfo> {
   const session = await page.context().newCDPSession(page);
   try {
     const { targetInfo } = await sendCDPCommand<{ targetInfo: TargetInfo }>(session, 'Target.getTargetInfo');
-    return targetInfo.targetId;
+    return targetInfo;
   } finally {
     await session.detach().catch(() => {});
   }

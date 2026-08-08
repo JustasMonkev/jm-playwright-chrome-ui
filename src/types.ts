@@ -41,4 +41,9 @@ export type TargetInfo = {
   title?: string;
   type?: string;
   url: string;
+  /**
+   * False for Chrome's own action popup bubble, true for every page Playwright owns. This is
+   * what separates the bubble from a tab the test (or the extension) opened on the same URL.
+   */
+  attached?: boolean;
 };

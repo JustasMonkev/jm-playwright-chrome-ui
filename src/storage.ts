@@ -17,14 +17,17 @@ export async function withExtensionPageSession<T>(
   callback: (session: CDPSession) => Promise<T>,
 ): Promise<T> {
   const origin = `chrome-extension://${extensionId}/`;
-  const existing = context.pages().find(page => !page.isClosed() && page.url().startsWith(origin));
+  // manifest.json is the one resource every unpacked extension is guaranteed to serve, so it is
+  // what a scratch page navigates to. Never adopt a page sitting on it: it belongs to another
+  // call in flight, which will close it again as soon as that call finishes.
+  const scratchURL = `${origin}manifest.json`;
+  const existing = context.pages().find(page =>
+    !page.isClosed() && page.url().startsWith(origin) && page.url() !== scratchURL);
   const page = existing ?? await context.newPage();
 
   try {
-    if (!existing) {
-      // manifest.json is the one resource every unpacked extension is guaranteed to serve.
-      await page.goto(`${origin}manifest.json`);
-    }
+    if (!existing)
+      await page.goto(scratchURL);
     const session = await context.newCDPSession(page);
     try {
       return await callback(session);
