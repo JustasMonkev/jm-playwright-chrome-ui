@@ -1,52 +1,56 @@
-import type { Browser, CDPSession, Page } from 'playwright-core';
+import type { CDPSession, Page } from 'playwright-core';
 
-import { sendCDPCommand, withBrowserSession } from './cdp';
-import type { ChromeExtension, TargetInfo } from './types';
+import { sendCDPCommand } from './cdp';
+import type { TargetInfo } from './types';
 
-export async function tabTargetIdForPage(page: Page, browser: Browser): Promise<string> {
+// How long to wait for a tab target to report the page it hosts. The event normally arrives in
+// single-digit milliseconds; this only bounds the pathological case.
+const kOwnershipTimeout = 500;
+
+/**
+ * Extensions.triggerAction only accepts a `tab` target — Chrome rejects a `page` target with
+ * "Action can only be triggered on a tab target." A tab target and the page target it hosts
+ * share no identifying field, so ask Chrome which page each tab owns.
+ */
+export async function tabTargetIdForPage(session: CDPSession, page: Page): Promise<string> {
   await page.bringToFront();
-  const pageTargetInfo = await pageTargetInfoFor(page);
-  return await matchingTabTargetId(browser, page, pageTargetInfo);
-}
+  const pageTargetId = await pageTargetIdFor(page);
 
-export async function waitForExtensionPopupURL(session: CDPSession, extension: ChromeExtension, existingTargetIds: Set<string>, timeout: number): Promise<string> {
-  const deadline = Date.now() + timeout;
-  while (Date.now() < deadline) {
-    const popupURL = await newExtensionTargetURL(session, extension.id, existingTargetIds);
-    if (popupURL)
-      return popupURL;
-    await delay(100);
+  for (const tab of await tabTargets(session)) {
+    if (await tabOwnsPageTarget(session, tab.targetId, pageTargetId))
+      return tab.targetId;
   }
-  throw new Error(`Extension "${extension.name}" did not open a popup within ${timeout}ms. Make sure the extension has a default action popup.`);
+
+  throw new Error(`Could not find the Chrome tab target for page "${page.url()}". The page may have been closed, or it may not be a tab (extension popups and devtools windows are not tabs).`);
 }
 
-export async function extensionTargets(session: CDPSession, extensionId: string): Promise<TargetInfo[]> {
+/** Targets serving a document from the extension's own origin, excluding duplicate tab entries. */
+export async function extensionDocumentTargets(session: CDPSession, extensionId: string): Promise<TargetInfo[]> {
   const { targetInfos } = await sendCDPCommand<{ targetInfos: TargetInfo[] }>(session, 'Target.getTargets', {
     filter: [{}],
   });
-  return targetInfos.filter(target => target.url.startsWith(`chrome-extension://${extensionId}/`));
+  const prefix = `chrome-extension://${extensionId}/`;
+  return targetInfos.filter(target => target.url.startsWith(prefix) && isDocumentTarget(target));
 }
 
-async function pageTargetInfoFor(page: Page): Promise<TargetInfo> {
+/**
+ * A service worker is not a document, and Chrome reports offscreen documents as
+ * `background_page`. Both live under the extension's origin, so matching on the URL prefix alone
+ * mistakes them for the action popup — especially under MV3, where the worker is restarted on
+ * demand and offscreen documents are created lazily.
+ */
+function isDocumentTarget(target: TargetInfo): boolean {
+  return target.type === 'page';
+}
+
+async function pageTargetIdFor(page: Page): Promise<string> {
   const session = await page.context().newCDPSession(page);
   try {
-    const result = await sendCDPCommand<{ targetInfo: TargetInfo }>(session, 'Target.getTargetInfo');
-    return result.targetInfo;
+    const { targetInfo } = await sendCDPCommand<{ targetInfo: TargetInfo }>(session, 'Target.getTargetInfo');
+    return targetInfo.targetId;
   } finally {
     await session.detach().catch(() => {});
   }
-}
-
-async function matchingTabTargetId(browser: Browser, page: Page, pageTargetInfo: TargetInfo): Promise<string> {
-  return await withBrowserSession(browser, async session => {
-    const candidates = await tabTargets(session);
-    const matches = candidates.filter(target => matchesPageTarget(target, pageTargetInfo));
-    if (matches.length === 1)
-      return matches[0].targetId;
-    if (!matches.length)
-      throw new Error(`Could not find a Chrome tab target for page "${page.url()}".`);
-    throw new Error(`Could not uniquely identify the Chrome tab target for page "${page.url()}". Make sure the page URL and title are unique among open tabs.`);
-  });
 }
 
 async function tabTargets(session: CDPSession): Promise<TargetInfo[]> {
@@ -56,20 +60,39 @@ async function tabTargets(session: CDPSession): Promise<TargetInfo[]> {
   return targetInfos;
 }
 
-function matchesPageTarget(tabTarget: TargetInfo, pageTarget: TargetInfo): boolean {
-  return tabTarget.browserContextId === pageTarget.browserContextId &&
-    tabTarget.url === pageTarget.url &&
-    tabTarget.title === pageTarget.title;
-}
+// Target.autoAttachRelated takes the tab as a parameter rather than requiring a command to be
+// sent on the tab's own session, which Playwright's CDPSession cannot address.
+async function tabOwnsPageTarget(session: CDPSession, tabTargetId: string, pageTargetId: string): Promise<boolean> {
+  const attachedSessionIds: string[] = [];
+  let reportOwnedPage: (targetId: string | undefined) => void = () => {};
+  const ownedPage = new Promise<string | undefined>(resolve => {
+    reportOwnedPage = resolve;
+  });
 
-async function newExtensionTargetURL(session: CDPSession, extensionId: string, existingTargetIds: Set<string>): Promise<string | undefined> {
-  for (const target of await extensionTargets(session, extensionId)) {
-    if (!existingTargetIds.has(target.targetId))
-      return target.url;
+  const onAttached = (event: any) => {
+    if (event.sessionId)
+      attachedSessionIds.push(event.sessionId);
+    if (event.targetInfo?.type === 'page')
+      reportOwnedPage(event.targetInfo.targetId);
+  };
+
+  session.on('Target.attachedToTarget' as any, onAttached);
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    await sendCDPCommand(session, 'Target.autoAttachRelated', {
+      targetId: tabTargetId,
+      waitForDebuggerOnStart: false,
+    });
+    const timedOut = new Promise<undefined>(resolve => {
+      timer = setTimeout(() => resolve(undefined), kOwnershipTimeout);
+    });
+    return await Promise.race([ownedPage, timedOut]) === pageTargetId;
+  } finally {
+    if (timer)
+      clearTimeout(timer);
+    session.off('Target.attachedToTarget' as any, onAttached);
+    // Leaving these attached would keep debugger sessions alive for every tab we probed.
+    for (const sessionId of attachedSessionIds)
+      await sendCDPCommand(session, 'Target.detachFromTarget', { sessionId }).catch(() => {});
   }
 }
-
-async function delay(ms: number): Promise<void> {
-  await new Promise(resolve => setTimeout(resolve, ms));
-}
-

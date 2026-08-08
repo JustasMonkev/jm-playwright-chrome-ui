@@ -6,6 +6,11 @@ export type ChromeExtension = {
   version: string;
   path: string;
   enabled: boolean;
+  /**
+   * Read from the extension's manifest.json. Undefined when the manifest could not be read,
+   * which happens for extensions whose directory is not reachable from the test process.
+   */
+  manifestVersion?: number;
 };
 
 export type ExtensionSelector = {
@@ -16,6 +21,16 @@ export type ExtensionSelector = {
 
 export type ExtensionActionOptions = ExtensionSelector & {
   timeout?: number;
+};
+
+export type ExtensionStorageArea = 'session' | 'local' | 'sync' | 'managed';
+
+export type ExtensionStorageOptions = ExtensionActionOptions & {
+  area?: ExtensionStorageArea;
+};
+
+export type ExtensionStorageReadOptions = ExtensionStorageOptions & {
+  keys?: string[];
 };
 
 export type ChromeUITarget = Browser | BrowserContext | Page;

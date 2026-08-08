@@ -16,6 +16,17 @@ profile or any browser exposed to untrusted remote debugging clients.
 npm install playwright jm-playwright-chrome-ui
 ```
 
+## Requirements
+
+- **Chromium with the CDP `Extensions` domain.** `Extensions.getExtensions` and
+  `Extensions.triggerAction` are verified present in Chrome 147 and verified
+  absent in Chrome 141 — on an older build these helpers fail with a protocol
+  error naming the missing command.
+- **The full Chrome binary, not the headless shell.** Extensions do load in
+  Chrome's new headless mode, so headless runs work as long as you pin
+  `channel: 'chromium'`. Playwright's default headless run uses the headless
+  shell, which has no extension support.
+
 ## Example
 
 ```ts
@@ -24,7 +35,7 @@ import { openExtension } from 'jm-playwright-chrome-ui';
 
 const extensionPath = 'youtube-short-blocker/dist';
 const context = await chromium.launchPersistentContext('/tmp/chrome-ui-profile', {
-  headless: false,
+  channel: 'chromium',
   args: [
     '--enable-unsafe-extension-debugging',
     `--disable-extensions-except=${extensionPath}`,
@@ -47,20 +58,88 @@ await context.close();
 
 ## API
 
+### Opening extension UI
+
 - `listExtensions(target)` lists loaded Chrome extensions.
 - `triggerExtensionAction(page, selector)` triggers an extension toolbar action.
-- `openExtension(page, options)` waits for the selected extension, opens its action, and returns an automatable Playwright `Page`.
+- `openExtension(page, options)` waits for the selected extension, opens its
+  action popup, and returns an automatable Playwright `Page`.
 
-Selectors can use `id`, `name`, `path`, or a combination of those fields. Passing
-both `name` and `path` is recommended when more than one extension may be loaded.
+### MV3 helpers
 
-This release is tested with Playwright 1.59.x.
+- `extensionServiceWorker(target, options)` resolves the extension's MV3
+  background service worker as a Playwright `Worker`.
+- `getExtensionStorage(target, options)` reads `chrome.storage`.
+- `setExtensionStorage(target, values, options)` writes `chrome.storage`.
+- `removeExtensionStorage(target, keys, options)` removes keys.
+- `clearExtensionStorage(target, options)` clears a storage area.
+- `readExtensionManifest(extensionPath)` parses an unpacked `manifest.json`.
+
+The storage helpers take an `area` of `'local'` (default), `'session'`,
+`'sync'`, or `'managed'`, and work whether or not any extension page is open —
+useful under MV3, where popups are short-lived. Values keep their JSON types in
+both directions, so numbers, booleans, arrays and objects need no encoding.
+
+```ts
+await setExtensionStorage(context, { blocklist: ['facebook.com'] }, { name: 'My Extension' });
+const stored = await getExtensionStorage(context, { name: 'My Extension', keys: ['blocklist'] });
+```
+
+## Selecting an extension
+
+Selectors can use `id`, `name`, `path`, or a combination of those fields.
+Passing both `name` and `path` is recommended when more than one extension may
+be loaded.
+
+`path` may be relative, and may travel through symlinks — it is compared
+against Chrome's canonical path, not string-matched.
+
+**`name` is the localized name.** Chrome returns the extension's name resolved
+against the browser's UI locale, so an extension whose manifest name is
+`__MSG_extName__` reports different names on differently-configured machines.
+Prefer `id` or `path` when your extension is localized.
+
+## MV3 notes
+
+**The popup URL comes from the manifest.** `openExtension` reads
+`action.default_popup` rather than watching for a new `chrome-extension://`
+target after the click. Under MV3 that click also restarts a dormant service
+worker and can create offscreen documents, and neither is distinguishable from
+a popup by URL prefix alone.
+
+If the extension declares no popup — an MV3 `action` with only a
+`chrome.action.onClicked` handler — `openExtension` throws immediately rather
+than waiting for a popup that will never open. Use `triggerExtensionAction` for
+those extensions.
+
+**The returned page is a tab, not Chrome's popup bubble.** Chrome's real popup
+bubble is never exposed to Playwright as a `Page`, so `openExtension` triggers
+the action, dismisses the bubble, and hosts the popup document in a tab. The
+popup's own scripts see a different `chrome.tabs` view as a result:
+
+| | real popup bubble | popup hosted in a tab |
+| --- | --- | --- |
+| `chrome.tabs.query({active: true, currentWindow: true})` | the page under test | the popup's own tab |
+| `chrome.tabs.getCurrent()` | `undefined` | the popup's own tab |
+
+MV3 popups commonly call `chrome.tabs.query` on open, because there is no
+persistent background page holding "which tab am I acting on". If yours does,
+it will act on the popup's tab under automation.
+
+**Service workers stop when idle.** `extensionServiceWorker` returns the
+currently running worker; that object goes dead when Chrome shuts the worker
+down, and calling again returns its replacement.
+
+**MV2 is not supported by recent Chrome.** Chrome 147 refuses to install
+manifest v2 extensions outright. The MV2 `browser_action` and `page_action`
+popup keys are still read for older browsers.
 
 ## Release Checks
 
 ```bash
 npm run build
 npm run typecheck
+npm test
 npm pack --dry-run
 npm publish --dry-run
 ```

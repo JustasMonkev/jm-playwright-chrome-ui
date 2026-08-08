@@ -11,7 +11,7 @@
   ],
   "main": "./index.js",
   "module": "./index.mjs",
-  "types": "./index.d.ts",
+  "types": "./lib/index.d.ts",
   "engines": {
     "node": ">=18"
   },
@@ -30,25 +30,23 @@
   "files": [
     "LICENSE",
     "README.md",
-    "index.d.ts",
     "index.js",
     "index.mjs",
     "lib",
-    "src",
-    "types"
+    "src"
   ],
   "scripts": {
-    "build": "esbuild src/index.ts --bundle --platform=node --format=cjs --outfile=lib/index.js",
+    "build": "esbuild src/index.ts --bundle --platform=node --format=cjs --outfile=lib/index.js && tsc -p tsconfig.build.json",
     "prepack": "npm run build && npm run typecheck",
     "report": "playwright show-report playwright-report",
-    "test": "npm run build && playwright test tests/youtube-short-blocker.spec.ts --headed",
-    "test:all": "npm run build && playwright test --headed",
+    "test": "npm run build && playwright test",
     "test:report": "npm test && npm run report",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test:headed": "npm run build && playwright test --headed"
   },
   "exports": {
     ".": {
-      "types": "./index.d.ts",
+      "types": "./lib/index.d.ts",
       "import": "./index.mjs",
       "require": "./index.js",
       "default": "./index.js"

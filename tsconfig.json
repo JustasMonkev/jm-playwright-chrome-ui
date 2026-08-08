@@ -14,8 +14,6 @@
     "examples/**/*.ts",
     "playwright.config.ts",
     "src/**/*.ts",
-    "tests/**/*.ts",
-    "types/**/*.d.ts",
-    "index.d.ts"
+    "tests/**/*.ts"
   ]
 }

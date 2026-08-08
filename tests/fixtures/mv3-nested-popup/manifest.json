@@ -1,0 +1,8 @@
+{
+  "manifest_version": 3,
+  "name": "MV3 Nested Popup Fixture",
+  "version": "1.0.0",
+  "action": { "default_popup": "ui/popup.html" },
+  "background": { "service_worker": "sw.js" },
+  "permissions": ["storage"]
+}

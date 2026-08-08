@@ -1,0 +1,8 @@
+{
+  "manifest_version": 3,
+  "name": "MV3 No Popup Fixture",
+  "version": "1.0.0",
+  "action": {},
+  "background": { "service_worker": "sw.js" },
+  "permissions": ["storage", "offscreen"]
+}

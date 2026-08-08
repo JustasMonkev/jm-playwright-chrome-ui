@@ -1,0 +1,9 @@
+{
+  "manifest_version": 3,
+  "name": "MV3 Offscreen Fixture",
+  "version": "1.0.0",
+  "action": { "default_popup": "popup.html" },
+  "background": { "service_worker": "sw.js" },
+  "options_page": "options.html",
+  "permissions": ["storage", "offscreen"]
+}

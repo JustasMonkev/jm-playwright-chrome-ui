@@ -1,6 +1,20 @@
-import type { Browser, CDPSession } from 'playwright-core';
+import type { Browser, BrowserContext, CDPSession } from 'playwright-core';
 
 import type { ChromeUITarget } from './types';
+
+export function contextFrom(target: ChromeUITarget): BrowserContext {
+  if ('context' in target)
+    return target.context();
+  if ('pages' in target)
+    return target;
+  if ('contexts' in target) {
+    const [context] = target.contexts();
+    if (context)
+      return context;
+    throw new Error('Chrome UI helpers need an open browser context. Launch one with chromium.launchPersistentContext() so the extension is loaded.');
+  }
+  throw new Error('Chrome UI helpers require a Playwright Browser, BrowserContext, or Page connected to Chromium.');
+}
 
 export function browserFrom(target: ChromeUITarget): Browser {
   if ('newBrowserCDPSession' in target)
@@ -39,8 +53,8 @@ export async function sendCDPCommand<T>(session: CDPSession, method: string, par
   try {
     return await (session as any).send(method, params);
   } catch (error: any) {
-    if (method.startsWith('Extensions.') && /wasn't found|enable-unsafe-extension-debugging|not supported|not allowed/i.test(error.message))
-      throw new Error(`Chrome extension UI commands require Chromium launched with --enable-unsafe-extension-debugging: ${error.message}`);
+    if (method.startsWith('Extensions.') && /wasn't found|not found|enable-unsafe-extension-debugging|not supported|not allowed/i.test(error.message))
+      throw new Error(`"${method}" is unavailable. Chrome extension UI commands require Chromium launched with --enable-unsafe-extension-debugging, and a Chrome build new enough to expose the CDP Extensions domain: ${error.message}`);
     throw error;
   }
 }
@@ -51,4 +65,3 @@ function assertChromiumBrowser(browser: Browser): void {
     throw new Error(`Chrome UI helpers only support Chromium browsers. Received "${browserType}".`);
   }
 }
-
