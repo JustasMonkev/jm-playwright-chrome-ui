@@ -139,6 +139,16 @@ launch with `--remote-debugging-port`, call `triggerExtensionAction`, wait for a
 enumerates it as a genuine `Page` with full locator support. It needs a fresh
 connection per popup, and that connection is yours to close.
 
+**The popup document loads twice per call.** Clicking the action is what opens
+Chrome's bubble, and the bubble runs the popup's scripts before it is dismissed
+and the document is re-hosted in a tab. A popup with side effects on load — a
+storage write, a message to the service worker — performs them twice. Assert on
+end state rather than on how many times something was written.
+
+**An open popup tab is reused.** Calling `openExtension` again returns the same
+`Page` rather than opening or reloading another copy, so exactly one instance
+stays live. Close it if you need the popup to start fresh.
+
 **Service workers stop when idle.** `extensionServiceWorker` returns the
 currently running worker; that object goes dead when Chrome shuts the worker
 down, and calling again returns its replacement.
