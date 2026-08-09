@@ -101,16 +101,20 @@ Prefer `id` or `path` when your extension is localized.
 
 ## MV3 notes
 
-**The popup URL comes from the manifest.** `openExtension` reads
-`action.default_popup` rather than watching for a new `chrome-extension://`
-target after the click. Under MV3 that click also restarts a dormant service
-worker and can create offscreen documents, and neither is distinguishable from
-a popup by URL prefix alone.
+**The popup is identified by Chrome's own bubble, not by guessing at targets.**
+`openExtension` clicks the action and then looks for the document Chrome
+actually opened, falling back to `action.default_popup` from the manifest. Under
+MV3 the click also restarts a dormant service worker and can create offscreen
+documents, and neither is distinguishable from a popup by URL prefix alone — the
+bubble is, because Chrome reports it as the one unattached extension page.
 
-If the extension declares no popup — an MV3 `action` with only a
-`chrome.action.onClicked` handler — `openExtension` throws immediately rather
-than waiting for a popup that will never open. Use `triggerExtensionAction` for
-those extensions.
+Reading the bubble rather than the manifest also means
+`chrome.action.setPopup()` is honoured. The manifest is only the default, and
+repointing the action at runtime — including per-tab — is ordinary MV3.
+
+If the extension opens no popup at all — an `action` with only a
+`chrome.action.onClicked` handler — `openExtension` says so instead of returning
+some other document. Use `triggerExtensionAction` for those extensions.
 
 **The returned page is a tab, not Chrome's popup bubble.** Chrome never emits an
 incremental attach event for a popup bubble opened after a client armed

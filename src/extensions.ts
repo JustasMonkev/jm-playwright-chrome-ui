@@ -15,6 +15,7 @@ import type {
   ExtensionSelector,
   ExtensionStorageOptions,
   ExtensionStorageReadOptions,
+  TargetInfo,
 } from './types';
 
 const kDefaultTimeout = 5000;
@@ -23,6 +24,9 @@ const kPollInterval = 100;
 // this only bounds the case where it never appears (for instance when the click toggled an
 // already-open popup shut).
 const kPopupDismissTimeout = 1000;
+// How long to wait for Chrome's bubble to surface. It appears a few hundred milliseconds after
+// the click; only an extension whose action opens nothing waits this out in full.
+const kBubbleTimeout = 2000;
 
 export async function listExtensions(target: ChromeUITarget): Promise<ChromeExtension[]> {
   const browser = browserFrom(target);
@@ -43,10 +47,10 @@ export async function triggerExtensionAction(page: Page, options: ExtensionSelec
  * Clicks the extension's toolbar action for `page`, then returns the popup document as an
  * automatable Page.
  *
- * The popup URL comes from the extension's manifest rather than from whichever
- * chrome-extension:// target appears after the click. Under MV3 that click also restarts a
- * dormant service worker and can create offscreen documents, and those are indistinguishable
- * from a popup by URL prefix alone.
+ * The popup is identified by Chrome's own bubble, falling back to the manifest, rather than by
+ * whichever chrome-extension:// target turns up after the click. Under MV3 that click also
+ * restarts a dormant service worker and can create offscreen documents, and those are
+ * indistinguishable from a popup by URL prefix alone.
  *
  * Chrome never surfaces its own popup bubble as a Page on the connection that launched the
  * browser, so the popup document is hosted in a tab instead. See the README for the
@@ -60,18 +64,29 @@ export async function openExtension(page: Page, options: ExtensionActionOptions)
   // instances of the popup document.
   return await withPopupLock(page.context(), () => withBrowserSession(browser, async session => {
     const extension = await waitForExtension(session, options, timeout);
-    const url = actionPopupURL(extension);
+    const declared = declaredPopupURL(extension);
     const targetId = await tabTargetIdForPage(session, page);
 
     await sendCDPCommand(session, 'Extensions.triggerAction', { id: extension.id, targetId });
 
-    // Leaving Chrome's bubble open would run a second live instance of the popup document
-    // alongside the one under test, doubling its storage writes and runtime messages.
-    const dismissed = await closeBubbleWithin(session, extension.id, url, Math.min(timeout, kPopupDismissTimeout));
+    // Chrome's own bubble is the authority on which document the action opens. The manifest is
+    // only the default: chrome.action.setPopup() routinely repoints the action at runtime, and
+    // per-tab popups are an ordinary MV3 pattern.
+    const bubble = await waitForActionPopupBubble(session, extension.id, Math.min(timeout, kBubbleTimeout));
+    const url = bubble?.url ?? declared;
+    if (!url)
+      throw noActionPopupError(extension);
+    assertPopupFileExists(extension, url);
+
+    // Leaving the bubble open would run a second live instance of the popup document alongside
+    // the one under test, doubling its storage writes and runtime messages.
+    if (bubble)
+      await sendCDPCommand(session, 'Target.closeTarget', { targetId: bubble.targetId }).catch(() => {});
+
     const popup = await pageForPopupURL(page, url, timeout);
-    // The bubble takes a few hundred milliseconds to surface, and longer on a loaded machine.
-    // If it had not appeared yet, keep looking now that the hosted tab exists.
-    if (!dismissed)
+    // The bubble surfaces a few hundred milliseconds after the click, and later on a loaded
+    // machine. If it had not appeared yet, look again now that the hosted tab exists.
+    if (!bubble)
       await closeBubbleWithin(session, extension.id, url, Math.min(timeout, kPopupDismissTimeout));
     return popup;
   }));
@@ -135,31 +150,51 @@ async function withExtensionStorageSession<T>(
   return await withExtensionPageSession(context, extension.id, session => callback(session, extension.id));
 }
 
-function actionPopupURL(extension: ChromeExtension): string {
+function declaredPopupURL(extension: ChromeExtension): string | undefined {
   const manifest = readExtensionManifest(extension.path);
-  if (!manifest.defaultPopup) {
-    const key = manifest.manifestVersion >= 3 ? 'action' : 'browser_action';
-    throw new Error(`Chrome extension "${extension.name}" does not declare an action popup (${key}.default_popup in its manifest), so clicking its toolbar icon opens no document. Use triggerExtensionAction() to dispatch chrome.action.onClicked instead.`);
-  }
+  return manifest.defaultPopup ? extensionResourceURL(extension.id, manifest.defaultPopup) : undefined;
+}
 
-  const url = extensionResourceURL(extension.id, manifest.defaultPopup);
-  // Chrome installs an extension whose default_popup points at nothing and serves its own error
-  // page for it, which would otherwise surface as a puzzling "locator not found" much later.
-  const file = popupFilePath(extension.path, url);
+function noActionPopupError(extension: ChromeExtension): Error {
+  return new Error(`Chrome extension "${extension.name}" opened no action popup: its manifest declares no default_popup and nothing set one with chrome.action.setPopup(), so clicking the toolbar icon dispatches chrome.action.onClicked instead. Use triggerExtensionAction() for that.`);
+}
+
+// Chrome installs an extension whose popup points at nothing and serves its own error page for
+// it, which would otherwise surface as a puzzling "locator not found" much later.
+function assertPopupFileExists(extension: ChromeExtension, popupURL: string): void {
+  const file = popupFilePath(extension.path, popupURL);
   if (file && !fs.existsSync(file))
-    throw new Error(`Chrome extension "${extension.name}" declares an action popup at "${manifest.defaultPopup}", but ${file} does not exist.`);
-
-  return url;
+    throw new Error(`Chrome extension "${extension.name}" points its action at "${popupURL}", but ${file} does not exist.`);
 }
 
 function popupFilePath(extensionPath: string, popupURL: string): string | undefined {
+  let relative: string;
   try {
-    const relative = decodeURIComponent(new URL(popupURL).pathname).replace(/^\/+/, '');
-    return relative ? path.join(extensionPath, relative) : undefined;
+    relative = decodeURIComponent(new URL(popupURL).pathname).replace(/^\/+/, '');
   } catch {
     // Malformed percent-encoding; leave it to Chrome rather than guessing at a filename.
     return undefined;
   }
+  if (!relative)
+    return undefined;
+
+  // Percent-encoded traversal survives URL normalisation and would otherwise let the existence
+  // check reach outside the extension directory.
+  const file = path.resolve(extensionPath, relative);
+  const root = path.resolve(extensionPath);
+  return file === root || file.startsWith(root + path.sep) ? file : undefined;
+}
+
+async function waitForActionPopupBubble(session: CDPSession, extensionId: string, budget: number): Promise<TargetInfo | undefined> {
+  const deadline = Date.now() + budget;
+  do {
+    const bubble = (await extensionDocumentTargets(session, extensionId))
+      .find(target => target.attached === false);
+    if (bubble)
+      return bubble;
+    await delay(25);
+  } while (Date.now() < deadline);
+  return undefined;
 }
 
 async function closeBubbleWithin(session: CDPSession, extensionId: string, popupURL: string, budget: number): Promise<boolean> {
@@ -183,8 +218,11 @@ async function closeBubbleWithin(session: CDPSession, extensionId: string, popup
 async function pageForPopupURL(page: Page, popupURL: string, timeout: number): Promise<Page> {
   const existingPopup = page.context().pages()
     .find(popup => !popup.isClosed() && isSameDocument(popup.url(), popupURL));
-  if (existingPopup)
+  if (existingPopup) {
+    // It may still be navigating — a page parked on the popup URL is not necessarily ready.
+    await existingPopup.waitForLoadState('domcontentloaded', { timeout }).catch(() => {});
     return existingPopup;
+  }
 
   const popup = await page.context().newPage();
   await popup.goto(popupURL, { waitUntil: 'domcontentloaded', timeout });
@@ -266,7 +304,10 @@ function matchesSelector(extension: ChromeExtension, selector: ExtensionSelector
 function matchesName(extensionName: string, selectorName: string | RegExp): boolean {
   if (typeof selectorName === 'string')
     return extensionName === selectorName;
-  return selectorName.test(extensionName);
+  // A /g or /y regexp carries lastIndex between calls, so testing several extensions with the
+  // same selector would skip matches and quietly turn "matched multiple" into "matched one".
+  const stateless = new RegExp(selectorName.source, selectorName.flags.replace(/[gy]/g, ''));
+  return stateless.test(extensionName);
 }
 
 function formatExtensions(extensions: ChromeExtension[]): string {

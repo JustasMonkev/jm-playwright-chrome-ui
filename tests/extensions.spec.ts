@@ -42,7 +42,21 @@ test('resolves a popup nested in a subdirectory', async ({}, testInfo) => {
   await context.close();
 });
 
-test('fails fast when the extension declares no action popup', async ({}, testInfo) => {
+test('follows a popup repointed at runtime with chrome.action.setPopup', async ({}, testInfo) => {
+  // The manifest declares declared.html; the service worker repoints the action at runtime.
+  // Trusting the manifest alone would automate a document the toolbar icon no longer opens.
+  const context = await launchWithExtension(fixturePath('mv3-runtime-popup'), testInfo.outputPath('profile'));
+  const page = await context.newPage();
+  await page.goto('data:text/html,<title>Under test</title><h1>host</h1>');
+
+  const popup = await openExtension(page, { name: 'MV3 Runtime Popup Fixture', timeout: 10_000 });
+
+  expect(popup.url()).toMatch(/\/runtime\.html$/);
+  await expect(popup.locator('#surface')).toHaveText('runtime');
+  await context.close();
+});
+
+test('reports that the extension opens no action popup', async ({}, testInfo) => {
   // Clicking this extension's action dispatches chrome.action.onClicked, which creates an
   // offscreen document. Waiting for a new extension target would return that document.
   const context = await launchWithExtension(fixturePath('mv3-no-popup'), testInfo.outputPath('profile'));
@@ -50,7 +64,7 @@ test('fails fast when the extension declares no action popup', async ({}, testIn
   await page.goto('data:text/html,<title>Under test</title><h1>host</h1>');
 
   await expect(openExtension(page, { name: 'MV3 No Popup Fixture', timeout: 10_000 }))
-    .rejects.toThrow(/does not declare an action popup/);
+    .rejects.toThrow(/opened no action popup/);
   await context.close();
 });
 
@@ -62,7 +76,7 @@ test('reports a declared popup whose file is missing', async ({}, testInfo) => {
   await page.goto('data:text/html,<title>Under test</title><h1>host</h1>');
 
   await expect(openExtension(page, { name: 'MV3 Missing Popup Fixture', timeout: 10_000 }))
-    .rejects.toThrow(/declares an action popup at "popup\.html", but .*popup\.html does not exist/);
+    .rejects.toThrow(/points its action at ".*popup\.html", but .*popup\.html does not exist/);
   await context.close();
 });
 
