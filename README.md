@@ -18,8 +18,10 @@ npm install playwright jm-playwright-chrome-ui
 
 ## Requirements
 
+This release is tested with Playwright 1.62.x and requires Node.js 20 or newer.
+
 - **Chromium with the CDP `Extensions` domain.** `Extensions.getExtensions` and
-  `Extensions.triggerAction` are verified present in Chrome 147 and verified
+  `Extensions.triggerAction` are verified present in Chrome 151 and verified
   absent in Chrome 141 — on an older build these helpers fail with a protocol
   error naming the missing command.
 - **The full Chrome binary, not the headless shell.** Extensions do load in
@@ -153,7 +155,7 @@ stays live. Close it if you need the popup to start fresh.
 currently running worker; that object goes dead when Chrome shuts the worker
 down, and calling again returns its replacement.
 
-**MV2 is not supported by recent Chrome.** Chrome 147 refuses to install
+**MV2 is not supported by recent Chrome.** Chrome 151 refuses to install
 manifest v2 extensions outright. The MV2 `browser_action` and `page_action`
 popup keys are still read for older browsers.
 
