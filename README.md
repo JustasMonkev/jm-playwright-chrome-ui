@@ -2,9 +2,8 @@
 
 Helpers for driving Chrome extension UI from Playwright.
 
-This package is Chromium-only. It uses Chrome DevTools Protocol extension
-commands and requires Chromium to be launched with
-`--enable-unsafe-extension-debugging`.
+This package is Chromium-only. It uses the experimental Chrome DevTools
+Protocol Extensions domain and is tested with Playwright's bundled Chromium.
 
 Use these helpers only in tests with trusted extensions, trusted pages, and
 throwaway browser profiles. Do not run them against your day-to-day Chrome
@@ -13,36 +12,36 @@ profile or any browser exposed to untrusted remote debugging clients.
 ## Install
 
 ```bash
-npm install playwright jm-playwright-chrome-ui
+npm install playwright@1.62 jm-playwright-chrome-ui
+npx playwright install chromium
 ```
 
 ## Example
 
 ```ts
+import * as path from 'node:path';
+
 import { chromium } from 'playwright';
 import { openExtension } from 'jm-playwright-chrome-ui';
 
-const extensionPath = 'youtube-short-blocker/dist';
-const context = await chromium.launchPersistentContext('/tmp/chrome-ui-profile', {
-  headless: false,
+const extensionPath = path.resolve('my-extension/dist');
+const context = await chromium.launchPersistentContext('', {
+  channel: 'chromium',
   args: [
-    '--enable-unsafe-extension-debugging',
     `--disable-extensions-except=${extensionPath}`,
     `--load-extension=${extensionPath}`,
   ],
 });
 
-const page = await context.newPage();
-await page.goto('https://example.com');
+try {
+  const page = await context.newPage();
+  await page.setContent('<title>Extension target</title>');
 
-const extensionPage = await openExtension(page, {
-  name: 'YouTube Shorts Blocker',
-  path: extensionPath,
-});
-await extensionPage.locator('#custom-site').fill('facebook.com');
-await extensionPage.getByRole('button', { name: 'Add to blocklist' }).click();
-
-await context.close();
+  const extensionPage = await openExtension(page, { path: extensionPath });
+  await extensionPage.getByRole('button', { name: 'Run' }).click();
+} finally {
+  await context.close();
+}
 ```
 
 ## API
@@ -54,13 +53,23 @@ await context.close();
 Selectors can use `id`, `name`, `path`, or a combination of those fields. Passing
 both `name` and `path` is recommended when more than one extension may be loaded.
 
-This release is tested with Playwright 1.62.x and requires Node.js 20 or newer.
+Playwright 1.62 does not expose the native toolbar popup as a `Page`.
+`openExtension` therefore returns a fresh, tab-hosted copy of the detected popup
+URL. It brings the original page back to the foreground before loading that copy,
+so popup code that queries the active tab still sees the page under test. Popup
+startup code runs in both the native popup and the tab-hosted copy; keep
+irreversible startup effects out of popup initialization.
+
+This release is tested with Playwright 1.62.x and requires Node.js 22 or newer.
+CI covers Node.js 22 and 24.
 
 ## Release Checks
 
 ```bash
 npm run build
 npm run typecheck
+npm run test:unit
+npm run test:e2e
 npm pack --dry-run
 npm publish --dry-run
 ```

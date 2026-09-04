@@ -1,12 +1,12 @@
-import type { Browser, CDPSession, Page } from 'playwright-core';
+import type { CDPSession, Page } from 'playwright-core';
 
-import { sendCDPCommand, withBrowserSession } from './cdp';
+import { sendCDPCommand } from './cdp';
 import type { ChromeExtension, TargetInfo } from './types';
 
-export async function tabTargetIdForPage(page: Page, browser: Browser): Promise<string> {
+export async function tabTargetIdForPage(page: Page, session: CDPSession): Promise<string> {
   await page.bringToFront();
   const pageTargetInfo = await pageTargetInfoFor(page);
-  return await matchingTabTargetId(browser, page, pageTargetInfo);
+  return await matchingTabTargetId(session, page, pageTargetInfo);
 }
 
 export async function waitForExtensionPopupURL(session: CDPSession, extension: ChromeExtension, existingTargetIds: Set<string>, timeout: number): Promise<string> {
@@ -21,10 +21,13 @@ export async function waitForExtensionPopupURL(session: CDPSession, extension: C
 }
 
 export async function extensionTargets(session: CDPSession, extensionId: string): Promise<TargetInfo[]> {
+  // Native popups start as "other" and Chromium may later classify them as "page".
   const { targetInfos } = await sendCDPCommand<{ targetInfos: TargetInfo[] }>(session, 'Target.getTargets', {
-    filter: [{}],
+    filter: [{ type: 'page' }, { type: 'other' }],
   });
-  return targetInfos.filter(target => target.url.startsWith(`chrome-extension://${extensionId}/`));
+  return targetInfos.filter(target =>
+    (target.type === 'page' || target.type === 'other') &&
+    target.url.startsWith(`chrome-extension://${extensionId}/`));
 }
 
 async function pageTargetInfoFor(page: Page): Promise<TargetInfo> {
@@ -37,16 +40,18 @@ async function pageTargetInfoFor(page: Page): Promise<TargetInfo> {
   }
 }
 
-async function matchingTabTargetId(browser: Browser, page: Page, pageTargetInfo: TargetInfo): Promise<string> {
-  return await withBrowserSession(browser, async session => {
-    const candidates = await tabTargets(session);
-    const matches = candidates.filter(target => matchesPageTarget(target, pageTargetInfo));
-    if (matches.length === 1)
-      return matches[0].targetId;
-    if (!matches.length)
-      throw new Error(`Could not find a Chrome tab target for page "${page.url()}".`);
-    throw new Error(`Could not uniquely identify the Chrome tab target for page "${page.url()}". Make sure the page URL and title are unique among open tabs.`);
-  });
+async function matchingTabTargetId(session: CDPSession, page: Page, pageTargetInfo: TargetInfo): Promise<string> {
+  const candidates = await tabTargets(session);
+  const matches = candidates.filter(target => matchesPageTarget(target, pageTargetInfo));
+  if (matches.length === 1)
+    return matches[0].targetId;
+  if (!matches.length)
+    throw new Error(`Could not find a Chrome tab target for page "${page.url()}".`);
+
+  const activeMatches = matches.filter(target => target.embedderData?.tabActive === true);
+  if (activeMatches.length === 1)
+    return activeMatches[0].targetId;
+  throw new Error(`Could not uniquely identify the Chrome tab target for page "${page.url()}". Make sure the page URL and title are unique among open tabs.`);
 }
 
 async function tabTargets(session: CDPSession): Promise<TargetInfo[]> {
@@ -63,13 +68,14 @@ function matchesPageTarget(tabTarget: TargetInfo, pageTarget: TargetInfo): boole
 }
 
 async function newExtensionTargetURL(session: CDPSession, extensionId: string, existingTargetIds: Set<string>): Promise<string | undefined> {
-  for (const target of await extensionTargets(session, extensionId)) {
-    if (!existingTargetIds.has(target.targetId))
-      return target.url;
-  }
+  const targets = (await extensionTargets(session, extensionId))
+      .filter(target => !existingTargetIds.has(target.targetId));
+  if (targets.length === 1)
+    return targets[0].url;
+  if (targets.length > 1)
+    throw new Error(`Extension "${extensionId}" opened multiple popup-like targets: ${targets.map(target => target.url).join(', ')}`);
 }
 
 async function delay(ms: number): Promise<void> {
   await new Promise(resolve => setTimeout(resolve, ms));
 }
-

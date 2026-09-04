@@ -24,8 +24,8 @@ export async function withBrowserSession<T>(browser: Browser, callback: (session
   let session: CDPSession;
   try {
     session = await browser.newBrowserCDPSession();
-  } catch (error: any) {
-    throw new Error(`Chrome UI helpers require Chromium CDP support: ${error.message}`);
+  } catch (error: unknown) {
+    throw new Error(`Chrome UI helpers require Chromium CDP support: ${errorMessage(error)}`, { cause: error });
   }
 
   try {
@@ -35,14 +35,24 @@ export async function withBrowserSession<T>(browser: Browser, callback: (session
   }
 }
 
-export async function sendCDPCommand<T>(session: CDPSession, method: string, params?: object): Promise<T> {
+type CDPMethod = Parameters<CDPSession['send']>[0];
+type DynamicCDPSender = <T>(method: CDPMethod, params?: Record<string, unknown>) => Promise<T>;
+
+export async function sendCDPCommand<T>(session: CDPSession, method: CDPMethod, params?: Record<string, unknown>): Promise<T> {
   try {
-    return await (session as any).send(method, params);
-  } catch (error: any) {
-    if (method.startsWith('Extensions.') && /wasn't found|enable-unsafe-extension-debugging|not supported|not allowed/i.test(error.message))
-      throw new Error(`Chrome extension UI commands require Chromium launched with --enable-unsafe-extension-debugging: ${error.message}`);
+    // SAFETY: the method stays in Playwright's CDP union; only its internal parameter mapping is erased.
+    const send = session.send.bind(session) as DynamicCDPSender;
+    return await send<T>(method, params);
+  } catch (error: unknown) {
+    const message = errorMessage(error);
+    if (method.startsWith('Extensions.') && /wasn't found|not supported|not allowed/i.test(message))
+      throw new Error(`Chrome extension UI commands require a recent Chromium build with Extensions CDP support: ${message}`, { cause: error });
     throw error;
   }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function assertChromiumBrowser(browser: Browser): void {
@@ -51,4 +61,3 @@ function assertChromiumBrowser(browser: Browser): void {
     throw new Error(`Chrome UI helpers only support Chromium browsers. Received "${browserType}".`);
   }
 }
-

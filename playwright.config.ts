@@ -4,6 +4,7 @@ export default defineConfig({
   testDir: '.',
   testMatch: [
     'tests/**/*.spec.ts',
+    'tests/**/*.spec.js',
     'examples/**/*.spec.ts',
   ],
   outputDir: 'test-results',
@@ -14,8 +15,8 @@ export default defineConfig({
   timeout: 30_000,
   workers: 1,
   use: {
-    trace: 'on',
-    screenshot: 'on',
-    video: 'on',
+    trace: 'retain-on-failure',
+    screenshot: 'only-on-failure',
+    video: 'retain-on-failure',
   },
 });
