@@ -23,6 +23,7 @@ export type ChromeUITarget = Browser | BrowserContext | Page;
 export type TargetInfo = {
   targetId: string;
   browserContextId?: string;
+  embedderData?: Record<string, unknown>;
   title?: string;
   type?: string;
   url: string;

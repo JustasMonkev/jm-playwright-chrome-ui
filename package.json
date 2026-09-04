@@ -13,7 +13,7 @@
   "module": "./index.mjs",
   "types": "./index.d.ts",
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "license": "MIT",
   "repository": {
@@ -41,9 +41,10 @@
     "build": "esbuild src/index.ts --bundle --platform=node --format=cjs --outfile=lib/index.js",
     "prepack": "npm run build && npm run typecheck",
     "report": "playwright show-report playwright-report",
-    "test": "npm run build && playwright test tests/youtube-short-blocker.spec.ts --headed",
-    "test:all": "npm run build && playwright test --headed",
+    "test": "npm run build && playwright test",
+    "test:e2e": "npm run build && playwright test tests/mv3-extension.spec.ts",
     "test:report": "npm test && npm run report",
+    "test:unit": "npm run build && playwright test tests/unit.spec.js",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "exports": {

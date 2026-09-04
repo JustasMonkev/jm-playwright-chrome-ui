@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "JM MV3 Fixture",
+  "version": "2.0.0",
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Run fixture action"
+  }
+}
