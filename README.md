@@ -44,7 +44,7 @@ try {
 }
 ```
 
-## API
+## APi
 
 - `listExtensions(target)` lists loaded Chrome extensions.
 - `triggerExtensionAction(page, selector)` triggers an extension toolbar action.
